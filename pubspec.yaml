@@ -1,6 +1,6 @@
 name: talkanote
 description: Flutter SDK for the talkaNote recording card. Bluetooth LE control, file transfer and live audio for Android, iOS, macOS and Windows apps.
-version: 0.1.0
+version: 0.2.0
 homepage: https://github.com/orainic/talkanote-sdk
 repository: https://github.com/orainic/talkanote-sdk
 publish_to: none

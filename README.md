@@ -8,8 +8,8 @@ One Dart API for Android, iOS, macOS and Windows apps.
 
 | | |
 |---|---|
-| Status | 0.1.0, Bluetooth. Wi-Fi transfer is planned, see [docs/wifi.md](docs/wifi.md) |
-| Tested on | talkaNote Wi-Fi card, firmware 544 (Windows, 2026-11-27) |
+| Status | 0.2.0: Bluetooth, plus Wi-Fi hotspot transfer, see [docs/wifi.md](docs/wifi.md) |
+| Tested on | talkaNote Wi-Fi card, firmware 544 (Windows, 2026-11-27): Bluetooth, and Wi-Fi download at about 76 KB/s |
 | Platforms | Android 5.0+ (API 21), iOS 13.1+, macOS 10.15+, Windows 10+ |
 | Bluetooth | [universal_ble](https://pub.dev/packages/universal_ble) (BSD-3-Clause) |
 | Licence | MIT, see [LICENSE](LICENSE) |
@@ -21,7 +21,7 @@ dependencies:
   talkanote:
     git:
       url: https://github.com/orainic/talkanote-sdk.git
-      ref: v0.1.0
+      ref: v0.2.0
 ```
 
 Platform setup (permissions) is in [docs/platform-setup.md](docs/platform-setup.md).
@@ -112,6 +112,8 @@ card.setAppForeground(true);  // in AppLifecycleState.resumed
 | `download(file, {format, offset, onProgress, onData})` | `Uint8List`; resumes after stalls |
 | `abortDownload()` | |
 | `delete(file)` / `deleteAll()` | `true`, `false`, or `null` if the firmware sent no answer |
+| `openHotspot()` `connectWifi()` `closeHotspot()` `setHotspotPassword(pw)` | Wi-Fi transfer, see [docs/wifi.md](docs/wifi.md) |
+| `setWifiNetwork()` `setUploadUrl()` `wifiNetwork()` `resetWifiNetwork()` | Wi-Fi direct upload (not yet tested on a card) |
 | `buttonEvents`, `liveEvents`, `disconnected` | streams / future |
 | `setAppForeground(bool)`, `answerButton(action)`, `disconnect()` | |
 
@@ -135,7 +137,7 @@ card.setAppForeground(true);  // in AppLifecycleState.resumed
 - [docs/platform-setup.md](docs/platform-setup.md): Android, iOS, macOS and Windows setup
 - [docs/audio.md](docs/audio.md): the Opus format and how to decode it
 - [docs/protocol.md](docs/protocol.md): the Bluetooth protocol, for other languages and tools
-- [docs/wifi.md](docs/wifi.md): Wi-Fi models and what is planned
+- [docs/wifi.md](docs/wifi.md): Wi-Fi hotspot transfer and direct upload
 - [example/](example/): a small app that scans, connects, lists, downloads, deletes and records
 
 ## Development

@@ -13,6 +13,8 @@ abstract final class FrameType {
   /// Recording control and button events. A frame of this type with no CMD
   /// byte is an ACK.
   static const recording = 3;
+
+  static const wifiDirect = 6;
 }
 
 /// TYPE 0: control.
@@ -25,6 +27,23 @@ abstract final class ControlCmd {
   static const getVersion = 10;
   static const version = 11;
   static const appState = 18;
+
+  // Wi-Fi hotspot (Wi-Fi models).
+  static const openHotspot = 19;
+  static const hotspotOpened = 20;
+  static const closeHotspot = 21;
+  static const hotspotClosed = 22;
+
+  /// Card to app: whether a phone has joined the hotspot. Also the reply to
+  /// [getHotspotClient].
+  static const hotspotClient = 23;
+  static const getHotspotClient = 24;
+  static const setHotspotPassword = 62;
+  static const hotspotPasswordResult = 63;
+
+  /// Card to app on connect: 1 when the app should answer every Wi-Fi packet
+  /// with `ACK`.
+  static const wifiAckMode = 30;
 }
 
 /// TYPE 1: live audio.
@@ -79,6 +98,18 @@ abstract final class RecordCmd {
   static const setGainResult = 28;
 
   static const buttonRequests = {start, save, pause, resume};
+}
+
+/// TYPE 6: Wi-Fi direct upload (the card joins a Wi-Fi network).
+abstract final class WifiDirectCmd {
+  static const setNetwork = 0;
+  static const setNetworkResult = 1;
+  static const setUploadUrl = 3;
+  static const setUploadUrlResult = 4;
+  static const reset = 5;
+  static const resetResult = 6;
+  static const get = 7;
+  static const config = 8;
 }
 
 /// Result codes of [FileCmd.downloadEnd].

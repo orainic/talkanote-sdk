@@ -6,6 +6,7 @@ import 'models.dart';
 import 'protocol/commands.dart';
 import 'protocol/frame.dart';
 import 'transport.dart';
+import 'wifi/wifi_link.dart';
 
 /// Called with bytes received so far and the expected total.
 typedef DownloadProgress = void Function(int received, int expected);
@@ -46,6 +47,11 @@ class TalkaNoteCard {
   final _buttons = StreamController<ButtonEvent>.broadcast();
   final _live = StreamController<LiveEvent>.broadcast();
   final _appButtonAt = <int, DateTime>{};
+  final _wifiParser = FrameParser();
+  final _hotspotClients = StreamController<bool>.broadcast();
+  CardWifiLink? _wifi;
+  StreamSubscription<Uint8List>? _wifiSub;
+  var _wifiAck = false;
   var _seq = -1;
   var _closed = false;
 
@@ -58,6 +64,13 @@ class TalkaNoteCard {
   /// Live audio while the card streams (after [startLive], or after a
   /// recording started with the card's button).
   Stream<LiveEvent> get liveEvents => _live.stream;
+
+  /// `true` when a phone or computer joins the card's hotspot, `false` when it
+  /// leaves.
+  Stream<bool> get hotspotClients => _hotspotClients.stream;
+
+  /// The attached Wi-Fi link, or null.
+  CardWifiLink? get wifi => _wifi;
 
   /// Completes when the link drops.
   Future<void> get disconnected => transport.disconnected;
@@ -278,6 +291,147 @@ class TalkaNoteCard {
     }
   }
 
+  // ---------------------------------------------------------- Wi-Fi hotspot
+
+  /// Turns on the card's Wi-Fi hotspot (Wi-Fi models only) and returns its
+  /// network name. Join that network, then call [connectWifi].
+  Future<Hotspot> openHotspot({Duration timeout = const Duration(seconds: 15)}) async {
+    final f = await _requestWithin(
+      FrameType.control,
+      ControlCmd.openHotspot,
+      ControlCmd.hotspotOpened,
+      const [],
+      timeout,
+    );
+    final code = f.body.isEmpty ? -1 : f.body[0];
+    if (code != 0) throw TalkaNoteException('The card could not open its hotspot (code $code)');
+    return Hotspot(name: _cString(Uint8List.sublistView(f.body, 1)).trim(), raw: f.body);
+  }
+
+  /// Turns the hotspot off. The Wi-Fi link closes with it.
+  Future<void> closeHotspot() async {
+    await disconnectWifi();
+    try {
+      await _request(FrameType.control, ControlCmd.closeHotspot, ControlCmd.hotspotClosed);
+    } on TimeoutException {
+      // Some firmware turns the hotspot off without answering.
+    }
+  }
+
+  /// Whether a phone or computer has joined the hotspot.
+  Future<bool> hotspotHasClient() async {
+    final f = await _request(FrameType.control, ControlCmd.getHotspotClient, ControlCmd.hotspotClient);
+    return f.body.isNotEmpty && f.body[0] == 1;
+  }
+
+  /// Sets the hotspot password: 8 to 16 characters. The card keeps it.
+  Future<void> setHotspotPassword(String password) async {
+    final n = password.runes.length;
+    if (n < 8 || n > 16) throw ArgumentError.value(password, 'password', 'must be 8 to 16 characters');
+    final f = await _request(
+      FrameType.control,
+      ControlCmd.setHotspotPassword,
+      ControlCmd.hotspotPasswordResult,
+      _lengthPrefixed(password),
+    );
+    _checkResult(f, 'set the hotspot password');
+  }
+
+  /// Opens the TCP link over the hotspot and attaches it. Call it after the
+  /// phone has joined the hotspot. Downloads then arrive over Wi-Fi.
+  Future<CardWifiLink> connectWifi({
+    String host = CardWifiLink.defaultHost,
+    int port = CardWifiLink.defaultPort,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final link = await CardWifiLink.connect(host: host, port: port, timeout: timeout);
+    attachWifi(link);
+    return link;
+  }
+
+  /// Uses [link] as a second channel for data from the card.
+  void attachWifi(CardWifiLink link) {
+    if (_closed) throw const TalkaNoteException('Card disconnected');
+    final old = _wifi;
+    if (old != null && !identical(old, link)) {
+      _wifiSub?.cancel();
+      old.close();
+    }
+    _wifi = link;
+    link.ackEachPacket = _wifiAck;
+    _wifiParser.reset();
+    _wifiSub = link.data.listen((c) => _onChunk(_wifiParser, c, fromEvents: false, viaWifi: true));
+    link.done.then((_) {
+      if (identical(_wifi, link)) {
+        _wifi = null;
+        _wifiSub?.cancel();
+        _wifiSub = null;
+      }
+    });
+  }
+
+  /// Closes the Wi-Fi link. Bluetooth stays connected.
+  Future<void> disconnectWifi() async {
+    final link = _wifi;
+    _wifi = null;
+    await _wifiSub?.cancel();
+    _wifiSub = null;
+    await link?.close();
+  }
+
+  // ----------------------------------------------------------- Wi-Fi direct
+
+  /// Wi-Fi network the card joins to upload recordings by itself (Wi-Fi
+  /// direct models).
+  Future<void> setWifiNetwork(String ssid, String password) async {
+    final f = await _request(FrameType.wifiDirect, WifiDirectCmd.setNetwork, WifiDirectCmd.setNetworkResult, [
+      ..._lengthPrefixed(ssid),
+      ..._lengthPrefixed(password),
+    ]);
+    _checkResult(f, 'set the Wi-Fi network');
+  }
+
+  /// Server address the card uploads recordings to (Wi-Fi direct models).
+  Future<void> setUploadUrl(String url) async {
+    final f = await _request(
+      FrameType.wifiDirect,
+      WifiDirectCmd.setUploadUrl,
+      WifiDirectCmd.setUploadUrlResult,
+      _lengthPrefixed(url),
+    );
+    _checkResult(f, 'set the upload address');
+  }
+
+  /// Forgets the Wi-Fi network (Wi-Fi direct models).
+  Future<void> resetWifiNetwork() async {
+    final f = await _request(FrameType.wifiDirect, WifiDirectCmd.reset, WifiDirectCmd.resetResult);
+    _checkResult(f, 'reset the Wi-Fi network');
+  }
+
+  /// The Wi-Fi network the card is set to join (Wi-Fi direct models).
+  Future<WifiNetworkConfig> wifiNetwork() async {
+    final f = await _request(FrameType.wifiDirect, WifiDirectCmd.get, WifiDirectCmd.config);
+    final b = f.body;
+    if (b.length < 2) throw TalkaNoteException('Bad Wi-Fi reply: ${hex(b)}');
+    final n = b[0] << 8 | b[1];
+    if (b.length < 2 + n) throw TalkaNoteException('Bad Wi-Fi reply: ${hex(b)}');
+    return WifiNetworkConfig(
+      ssid: utf8.decode(b.sublist(2, 2 + n), allowMalformed: true),
+      state: b.length > 2 + n ? b[2 + n] : -1,
+    );
+  }
+
+  static List<int> _lengthPrefixed(String s) {
+    final b = utf8.encode(s);
+    if (b.length > 0xFFFF) throw ArgumentError.value(s, 's', 'too long');
+    return [b.length >> 8, b.length & 0xFF, ...b];
+  }
+
+  static void _checkResult(Frame f, String what) {
+    final code = f.body.isEmpty ? -1 : f.body[0];
+    if (code != 0) throw TalkaNoteException('The card could not $what (code $code)');
+  }
+
   // ------------------------------------------------------------ connection
 
   Future<void> disconnect() async {
@@ -293,6 +447,7 @@ class TalkaNoteCard {
       if (!w.isCompleted) w.completeError(e);
     }
     _waiters.clear();
+    disconnectWifi();
     _list?.idle?.cancel();
     if (_list?.done.isCompleted == false) _list!.done.completeError(e);
     _download?.idle?.cancel();
@@ -302,6 +457,7 @@ class TalkaNoteCard {
     }
     _buttons.close();
     _live.close();
+    _hotspotClients.close();
   }
 
   // ------------------------------------------------------------ frame I/O
@@ -334,11 +490,12 @@ class TalkaNoteCard {
     }
   }
 
-  void _onChunk(FrameParser parser, Uint8List chunk, {required bool fromEvents}) {
+  void _onChunk(FrameParser parser, Uint8List chunk, {required bool fromEvents, bool viaWifi = false}) {
     for (final f in parser.add(chunk)) {
       if (f.isAck) continue;
-      // Acknowledge every frame from the card with its SEQ, as the card's own apps do.
-      if (!_closed) {
+      // Acknowledge every Bluetooth frame from the card with its SEQ, as the
+      // card's own apps do. Wi-Fi data is acknowledged by CardWifiLink instead.
+      if (!_closed && !viaWifi) {
         transport.write(encodeRawFrame(f.seq, const [FrameType.recording])).catchError((Object _) {});
       }
       _onFrame(f, fromEvents: fromEvents);
@@ -347,6 +504,16 @@ class TalkaNoteCard {
 
   void _onFrame(Frame f, {required bool fromEvents}) {
     final cmd = f.cmd!;
+    if (f.type == FrameType.control) {
+      if (cmd == ControlCmd.wifiAckMode) {
+        _wifiAck = f.body.isNotEmpty && f.body[0] == 1;
+        _wifi?.ackEachPacket = _wifiAck;
+        return;
+      }
+      if (cmd == ControlCmd.hotspotClient && !_hotspotClients.isClosed) {
+        _hotspotClients.add(f.body.isNotEmpty && f.body[0] == 1);
+      }
+    }
     if (f.type == FrameType.file) {
       final dl = _download;
       if (dl != null && (cmd == FileCmd.downloadStart || cmd == FileCmd.downloadData || cmd == FileCmd.downloadEnd)) {

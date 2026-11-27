@@ -9,7 +9,7 @@ const frameMagic = 0x5A;
 const frameHeaderLength = 6;
 
 /// A LEN above this is treated as a false header and skipped.
-const maxFrameDataLength = 8192;
+const maxFrameDataLength = 20480;
 
 /// One protocol frame: `5A SEQ CRC(LE) LEN(LE) DATA`, where DATA is
 /// `TYPE CMD PARAMS...`.
@@ -106,6 +106,7 @@ class FrameParser {
     return frames;
   }
 
+  /// Drops any partial frame.
   void reset() {
     _buf.clear();
     _pending = Uint8List(0);

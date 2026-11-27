@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Wi-Fi hotspot transfer: `openHotspot`, `connectWifi`, `closeHotspot`,
+  `setHotspotPassword`, `hotspotHasClient`, `hotspotClients`. File data comes
+  over Wi-Fi; commands stay on Bluetooth. About 76 KB/s on firmware 544, against
+  3.6 KB/s over Bluetooth.
+- `CardWifiLink`: TCP link with heartbeat and the card's `ACK` mode.
+- Wi-Fi direct upload commands: `setWifiNetwork`, `setUploadUrl`,
+  `wifiNetwork`, `resetWifiNetwork` (not yet tested on a card).
+- Example app: Wi-Fi button; on Windows it joins the card's hotspot by itself.
+
 ## 0.1.0
 
 First release.

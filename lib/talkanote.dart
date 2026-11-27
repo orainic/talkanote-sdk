@@ -17,3 +17,4 @@ export 'src/protocol/commands.dart';
 export 'src/protocol/crc16.dart';
 export 'src/protocol/frame.dart';
 export 'src/transport.dart';
+export 'src/wifi/wifi_link.dart';

@@ -243,6 +243,35 @@ class TalkaNoteException implements Exception {
   String toString() => 'TalkaNoteException: $message';
 }
 
+/// The card's Wi-Fi hotspot, from [TalkaNoteCard.openHotspot].
+class Hotspot {
+  const Hotspot({required this.name, required this.raw});
+
+  /// Network name (SSID) to join.
+  final String name;
+
+  /// The card's full reply, for debugging.
+  final Uint8List raw;
+
+  @override
+  String toString() => 'Hotspot($name)';
+}
+
+/// Wi-Fi network the card uses for direct upload, from
+/// [TalkaNoteCard.wifiNetwork].
+class WifiNetworkConfig {
+  const WifiNetworkConfig({required this.ssid, required this.state});
+
+  /// Empty when none is set.
+  final String ssid;
+
+  /// Connection state code reported by the card.
+  final int state;
+
+  @override
+  String toString() => 'WifiNetworkConfig($ssid, state $state)';
+}
+
 /// The card answered a download with "file not found".
 class FileNotFoundOnCard extends TalkaNoteException {
   const FileNotFoundOnCard(super.message);

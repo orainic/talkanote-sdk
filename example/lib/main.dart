@@ -5,6 +5,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:talkanote/talkanote.dart';
 
+import 'windows_wifi.dart';
+
 void main() => runApp(const ExampleApp());
 
 class ExampleApp extends StatelessWidget {
@@ -36,6 +38,9 @@ class _CardPageState extends State<CardPage> {
   bool _live = false;
   int _liveBytes = 0;
   String _transfer = '';
+  String _wifiStatus = '';
+  String? _hotspotName;
+  String? _homeNetwork;
   final _subs = <StreamSubscription<Object>>[];
 
   void _say(String s) {
@@ -139,8 +144,51 @@ class _CardPageState extends State<CardPage> {
     await out.writeAsBytes(data);
     final rate = data.length / (watch.elapsedMilliseconds / 1000);
     setState(() => _transfer = '');
-    _say('Saved ${out.path} (${data.length} B, ${rate.toStringAsFixed(0)} B/s)');
+    final via = _card!.wifi != null ? 'Wi-Fi' : 'Bluetooth';
+    _say('Saved ${out.path} (${data.length} B, ${(rate / 1024).toStringAsFixed(1)} KB/s over $via)');
   });
+
+  /// Turns on the card's hotspot and waits for this device to join it. On a
+  /// phone, your app would join the network for the user (see docs/wifi.md).
+  Future<void> _toggleWifi() => _run('Wi-Fi', () async {
+    final card = _card!;
+    if (card.wifi != null) {
+      await _wifiOff();
+      return;
+    }
+    final hotspot = await card.openHotspot();
+    _hotspotName = hotspot.name;
+    _say('Hotspot on: ${hotspot.name}');
+    try {
+      if (Platform.isWindows) {
+        _homeNetwork = await WindowsWifi.currentNetwork();
+        setState(() => _wifiStatus = 'Joining "${hotspot.name}"…');
+        await WindowsWifi.joinOpen(hotspot.name);
+      } else {
+        setState(() => _wifiStatus = 'Join the Wi-Fi network "${hotspot.name}" on this device…');
+      }
+      final link = await card.connectWifi(timeout: const Duration(seconds: 60));
+      setState(() => _wifiStatus = 'Wi-Fi on (${hotspot.name}): downloads now go over Wi-Fi');
+      _say('Wi-Fi connected');
+      link.done.then((_) {
+        if (mounted) setState(() => _wifiStatus = '');
+      });
+    } catch (e) {
+      await _wifiOff();
+      rethrow;
+    }
+  });
+
+  Future<void> _wifiOff() async {
+    await _card?.closeHotspot();
+    if (Platform.isWindows && _hotspotName != null) {
+      await WindowsWifi.rejoin(_homeNetwork, forget: _hotspotName);
+      _say('Back on ${_homeNetwork ?? 'no network'}');
+    }
+    _hotspotName = null;
+    if (mounted) setState(() => _wifiStatus = '');
+    _say('Wi-Fi off');
+  }
 
   Future<void> _delete(CardFile f) => _run('Delete', () async {
     final ok = await _card!.delete(f);
@@ -208,11 +256,16 @@ class _CardPageState extends State<CardPage> {
                     onPressed: _busy ? null : () => _run('Refresh', _refresh),
                     child: const Text('Refresh'),
                   ),
+                  OutlinedButton(
+                    onPressed: _busy ? null : _toggleWifi,
+                    child: Text(card.wifi != null ? 'Wi-Fi off' : 'Wi-Fi'),
+                  ),
                   OutlinedButton(onPressed: () => card.disconnect(), child: const Text('Disconnect')),
                 ],
               ),
               if (_live) Text('Live audio: ${opusDuration(_liveBytes).inSeconds} s received'),
               if (_transfer.isNotEmpty) Text(_transfer),
+              if (_wifiStatus.isNotEmpty) Text(_wifiStatus),
               const Divider(),
               Expanded(
                 child: ListView(

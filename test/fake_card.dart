@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -21,6 +22,30 @@ class FakeCard implements CardTransport {
   bool longNames = false;
   final _parser = FrameParser();
   var _seq = 0;
+
+  /// Wi-Fi: once a client connects, replies go over TCP instead of Bluetooth.
+  ServerSocket? wifiServer;
+  Socket? wifiClient;
+  final wifiReceived = BytesBuilder();
+  String? wifiSsid;
+  String? hotspotPassword;
+  String? uploadUrl;
+
+  /// Starts a loopback TCP server that stands in for the card's hotspot.
+  Future<int> startWifi() async {
+    final server = wifiServer = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((socket) {
+      wifiClient = socket;
+      socket.listen(wifiReceived.add, onDone: () => wifiClient = null);
+    });
+    return server.port;
+  }
+
+  Future<void> stopWifi() async {
+    wifiClient?.destroy();
+    wifiClient = null;
+    await wifiServer?.close();
+  }
 
   /// Files on the card: name -> Opus bytes.
   final files = <String, Uint8List>{};
@@ -63,6 +88,11 @@ class FakeCard implements CardTransport {
   /// Sends a frame from the card on the main channel, split into notifications.
   void notify(int type, int cmd, [List<int> params = const []]) {
     final frame = encodeFrame(_seq++, type, cmd, params);
+    final tcp = wifiClient;
+    if (tcp != null) {
+      tcp.add(frame);
+      return;
+    }
     for (var i = 0; i < frame.length; i += chunk) {
       _main.add(Uint8List.sublistView(frame, i, i + chunk > frame.length ? frame.length : i + chunk));
     }
@@ -93,6 +123,28 @@ class FakeCard implements CardTransport {
       case (FrameType.file, FileCmd.deleteOne):
         final name = utf8.decode(body.sublist(4));
         notify(FrameType.file, FileCmd.deleteOneResult, [files.remove(name) != null ? 0 : 1]);
+      case (FrameType.control, ControlCmd.openHotspot):
+        notify(FrameType.control, ControlCmd.hotspotOpened, [0, ...utf8.encode('talkaNote-0D29')]);
+      case (FrameType.control, ControlCmd.closeHotspot):
+        notify(FrameType.control, ControlCmd.hotspotClosed, [0]);
+      case (FrameType.control, ControlCmd.getHotspotClient):
+        notify(FrameType.control, ControlCmd.hotspotClient, [wifiClient != null ? 1 : 0]);
+      case (FrameType.control, ControlCmd.setHotspotPassword):
+        hotspotPassword = utf8.decode(body.sublist(2, 2 + (body[0] << 8 | body[1])));
+        notify(FrameType.control, ControlCmd.hotspotPasswordResult, [0]);
+      case (FrameType.wifiDirect, WifiDirectCmd.setNetwork):
+        final n = body[0] << 8 | body[1];
+        wifiSsid = utf8.decode(body.sublist(2, 2 + n));
+        notify(FrameType.wifiDirect, WifiDirectCmd.setNetworkResult, [0]);
+      case (FrameType.wifiDirect, WifiDirectCmd.setUploadUrl):
+        uploadUrl = utf8.decode(body.sublist(2));
+        notify(FrameType.wifiDirect, WifiDirectCmd.setUploadUrlResult, [0]);
+      case (FrameType.wifiDirect, WifiDirectCmd.reset):
+        wifiSsid = null;
+        notify(FrameType.wifiDirect, WifiDirectCmd.resetResult, [0]);
+      case (FrameType.wifiDirect, WifiDirectCmd.get):
+        final b = utf8.encode(wifiSsid ?? '');
+        notify(FrameType.wifiDirect, WifiDirectCmd.config, [b.length >> 8, b.length & 0xFF, ...b, 1]);
       case (FrameType.recording, RecordCmd.getState):
         notify(FrameType.recording, RecordCmd.state, [2]);
       case (FrameType.recording, RecordCmd.setGain):
