@@ -157,11 +157,12 @@ class _CardPageState extends State<CardPage> {
   Future<void> _toggleRecording() => _run('Record', () async {
     final card = _card!;
     if (await card.recordingState() == RecordingState.idle) {
-      _say('Start recording: ${await card.startRecording() ? 'ok' : 'refused'}');
-      await card.startLive();
+      await card.startRecording();
+      _say('Recording started');
     } else {
-      await card.stopLive();
-      _say('Save recording: ${await card.saveRecording() ? 'ok' : 'refused'}');
+      await card.saveRecording();
+      _say('Recording saved');
+      await Future<void>.delayed(const Duration(seconds: 1));
     }
     await _refresh();
   });

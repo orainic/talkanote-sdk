@@ -81,6 +81,35 @@ void main() {
     });
   });
 
+  test('newer firmware: long names list, download and delete', () async {
+    fake
+      ..longNames = true
+      ..files['note 2026-11-27_10-02-08.opus'] = _bytes(800);
+    final file = (await card.listFiles()).single;
+    expect(file.name, 'note 2026-11-27_10-02-08.opus');
+    expect(await card.download(file), hasLength(800));
+    expect(await card.delete(file), isTrue);
+  });
+
+  test('acknowledges every frame from the card', () async {
+    await card.battery();
+    expect(fake.acks, hasLength(1));
+  });
+
+  test('records through the live channel', () async {
+    await card.startRecording();
+    await card.pauseRecording();
+    await card.resumeRecording();
+    await card.saveRecording();
+    expect(fake.written.map((f) => (f.type, f.cmd, f.body.toList().join(','))), [
+      (FrameType.live, LiveCmd.start, ''),
+      (FrameType.live, LiveCmd.pauseResume, '1'),
+      (FrameType.live, LiveCmd.pauseResume, '0'),
+      (FrameType.live, LiveCmd.stop, ''),
+      (FrameType.live, LiveCmd.stop, ''),
+    ]);
+  });
+
   test('a missing file fails without retrying', () async {
     final file = CardFile(name: 'note20990101-000000.opus', duration: Duration.zero, size: 0, listEntry: Uint8List(28));
     await expectLater(card.download(file), throwsA(isA<FileNotFoundOnCard>()));

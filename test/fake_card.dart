@@ -15,6 +15,10 @@ class FakeCard implements CardTransport {
   final _events = StreamController<Uint8List>.broadcast(sync: true);
   final _disconnected = Completer<void>();
   final written = <Frame>[];
+  final acks = <Frame>[];
+
+  /// Old firmware lists fixed 20-byte names; newer firmware longer ones.
+  bool longNames = false;
   final _parser = FrameParser();
   var _seq = 0;
 
@@ -47,6 +51,10 @@ class FakeCard implements CardTransport {
   Future<void> write(Uint8List bytes) async {
     if (bytes.length > maxWriteLength) throw StateError('write of ${bytes.length} B > $maxWriteLength');
     for (final f in _parser.add(bytes)) {
+      if (f.isAck) {
+        acks.add(f);
+        continue;
+      }
       written.add(f);
       scheduleMicrotask(() => _handle(f));
     }
@@ -79,8 +87,8 @@ class FakeCard implements CardTransport {
         _sendList();
       case (FrameType.file, FileCmd.download):
         final offset = ByteData.sublistView(body).getUint32(0, Endian.little);
-        final raw = body.sublist(4, 28);
-        final name = ascii.decode(raw.sublist(0, raw.contains(0) ? raw.indexOf(0) : 24));
+        final raw = body.sublist(4);
+        final name = ascii.decode(raw.contains(0) ? raw.sublist(0, raw.indexOf(0)) : raw);
         _sendFile(name, offset);
       case (FrameType.file, FileCmd.deleteOne):
         final name = utf8.decode(body.sublist(4));
@@ -103,9 +111,11 @@ class FakeCard implements CardTransport {
           ..setUint32(0, files[n]!.length ~/ 2000, Endian.big)
           ..setUint32(4, files[n]!.length, Endian.big);
         final entry = e.buffer.asUint8List();
-        final short = ascii.encode(n).take(20).toList(); // the list field truncates to 20 bytes
-        entry.setRange(8, 8 + short.length, short);
-        b.add(entry);
+        // The card sends the name without "opus", ending at the dot.
+        final listed = n.substring(0, n.length - 4);
+        b
+          ..add(entry.sublist(0, 8))
+          ..add(ascii.encode(longNames ? ' $listed' : listed));
       }
       notify(FrameType.file, FileCmd.listBatch, b.toBytes());
     }

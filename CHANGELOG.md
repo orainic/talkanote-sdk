@@ -11,3 +11,6 @@ First release.
 - File list, download with progress, streaming and resume after stalls, Opus or WAV.
 - Delete one or all recordings.
 - Live audio stream while recording; Opus packet and WAV helpers.
+- Works with both firmware lines: fixed 20-byte list names (`V1.0.0`) and
+  longer names (`544`); every card frame is acknowledged.
+- Tested end to end on a Wi-Fi card, firmware 544.

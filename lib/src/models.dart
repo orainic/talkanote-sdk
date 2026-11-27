@@ -43,21 +43,33 @@ class CardFile {
   CardFile({required this.name, required this.duration, required this.size, required Uint8List listEntry})
     : listEntry = Uint8List.fromList(listEntry);
 
-  /// Parses one 28-byte entry of a file-list batch.
-  factory CardFile.fromListEntry(Uint8List entry) {
-    final view = ByteData.sublistView(entry);
-    final raw = entry.sublist(8, 28);
-    final end = raw.indexOf(0);
-    var name = String.fromCharCodes(end < 0 ? raw : raw.sublist(0, end));
-    // The list field is 20 bytes, so "note20261030-111449.opus" arrives as
-    // "note20261030-111449."; put the extension back.
-    if (name.endsWith('.')) name = '${name}opus';
-    return CardFile(
-      name: name,
-      duration: Duration(seconds: view.getUint32(0, Endian.big)),
-      size: view.getUint32(4, Endian.big),
-      listEntry: entry,
-    );
+  /// Parses the entries of one file-list batch: count (4 B, big-endian), then
+  /// per file duration (4 B BE), size (4 B BE) and a name that ends with `.`.
+  ///
+  /// Names are cut before the extension: older firmware sends a fixed 20-byte
+  /// `note20261030-111449.`, newer firmware a longer `" note 2026-11-27_10-00-00."`.
+  /// Both end at the first `.`, with no padding after it.
+  static List<CardFile> parseListBatch(Uint8List body) {
+    final files = <CardFile>[];
+    if (body.length < 4) return files;
+    final view = ByteData.sublistView(body);
+    final count = view.getUint32(0, Endian.big);
+    var o = 4;
+    for (var i = 0; i < count && o + 9 <= body.length; i++) {
+      final dot = body.indexOf(0x2E, o + 8);
+      if (dot < 0) break;
+      final raw = String.fromCharCodes(body.sublist(o + 8, dot)).replaceAll(String.fromCharCode(0), '').trim();
+      files.add(
+        CardFile(
+          name: raw.endsWith('.opus') ? raw : '$raw.opus',
+          duration: Duration(seconds: view.getUint32(o, Endian.big)),
+          size: view.getUint32(o + 4, Endian.big),
+          listEntry: body.sublist(o, dot + 1),
+        ),
+      );
+      o = dot + 1;
+    }
+    return files;
   }
 
   /// Full file name, e.g. `note20261030-111449.opus`. Use it unchanged for
@@ -86,7 +98,7 @@ class CardFile {
 
   /// Local start time encoded in the name, or null if the name has none.
   DateTime? get recordedAt {
-    final m = RegExp(r'^(?:note|call)(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})').firstMatch(name);
+    final m = RegExp(r'^(?:note|call)\s*(\d{4})-?(\d{2})-?(\d{2})[-_](\d{2})-?(\d{2})-?(\d{2})').firstMatch(name);
     if (m == null) return null;
     final p = [for (var i = 1; i <= 6; i++) int.parse(m.group(i)!)];
     return DateTime(p[0], p[1], p[2], p[3], p[4], p[5]);

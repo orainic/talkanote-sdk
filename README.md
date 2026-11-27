@@ -9,6 +9,7 @@ One Dart API for Android, iOS, macOS and Windows apps.
 | | |
 |---|---|
 | Status | 0.1.0, Bluetooth. Wi-Fi transfer is planned, see [docs/wifi.md](docs/wifi.md) |
+| Tested on | talkaNote Wi-Fi card, firmware 544 (Windows, 2026-11-27) |
 | Platforms | Android 5.0+ (API 21), iOS 13.1+, macOS 10.15+, Windows 10+ |
 | Bluetooth | [universal_ble](https://pub.dev/packages/universal_ble) (BSD-3-Clause) |
 | Licence | MIT, see [LICENSE](LICENSE) |
@@ -62,10 +63,8 @@ card.liveEvents.listen((e) {
     default:
   }
 });
-await card.startRecording();
-await card.startLive();
+await card.startRecording(); // the card records and streams
 // ...
-await card.stopLive();
 await card.saveRecording();
 ```
 
@@ -106,10 +105,9 @@ card.setAppForeground(true);  // in AppLifecycleState.resumed
 | `firmwareVersion()` | e.g. `V1.0.0` |
 | `syncTime([DateTime])` | the card names recordings by its clock |
 | `recordingState()` | `idle`, `recording`, `paused` |
-| `startRecording()` `saveRecording()` `pauseRecording()` `resumeRecording()` | `true` if the card accepted |
+| `startRecording()` `saveRecording()` `pauseRecording()` `resumeRecording()` | the card records and streams to `liveEvents`; it sends no confirmation, so check `recordingState()` |
 | `recordingTime()` `currentFileName()` | while recording |
 | `gain()` / `setGain(Gain.low/medium/high)` | microphone gain |
-| `startLive()` `stopLive()` `pauseLive(bool)` | audio stream, see `liveEvents` |
 | `listFiles()` | `List<CardFile>`: `name`, `duration`, `size`, `mode` (note/call), `recordedAt` |
 | `download(file, {format, offset, onProgress, onData})` | `Uint8List`; resumes after stalls |
 | `abortDownload()` | |

@@ -105,15 +105,31 @@ class TalkaNoteCard {
   Future<RecordingState> recordingState() async =>
       RecordingState.fromCode((await _record(RecordCmd.getState, RecordCmd.state)).body[0]);
 
-  /// Starts recording. Returns false if the card refused.
-  Future<bool> startRecording() async => (await _record(RecordCmd.start, RecordCmd.startResult)).body[0] == 1;
+  /// Starts recording. The card also streams the audio while it records; listen
+  /// to [liveEvents] to receive it. The card sends no confirmation: check
+  /// [recordingState] or wait for [LiveStarted].
+  Future<void> startRecording() {
+    _appButtonAt[RecordCmd.start] = DateTime.now();
+    return _send(FrameType.live, LiveCmd.start);
+  }
 
   /// Stops and saves the recording.
-  Future<bool> saveRecording() async => (await _record(RecordCmd.save, RecordCmd.saveResult)).body[0] == 1;
+  Future<void> saveRecording() async {
+    _appButtonAt[RecordCmd.save] = DateTime.now();
+    // Sent twice, as the card can miss a single stop.
+    await _send(FrameType.live, LiveCmd.stop);
+    await _send(FrameType.live, LiveCmd.stop);
+  }
 
-  Future<bool> pauseRecording() async => (await _record(RecordCmd.pause, RecordCmd.pauseResult)).body[0] == 1;
+  Future<void> pauseRecording() {
+    _appButtonAt[RecordCmd.pause] = DateTime.now();
+    return _send(FrameType.live, LiveCmd.pauseResume, [1]);
+  }
 
-  Future<bool> resumeRecording() async => (await _record(RecordCmd.resume, RecordCmd.resumeResult)).body[0] == 1;
+  Future<void> resumeRecording() {
+    _appButtonAt[RecordCmd.resume] = DateTime.now();
+    return _send(FrameType.live, LiveCmd.pauseResume, [0]);
+  }
 
   Future<RecordingTime> recordingTime() async {
     final v = ByteData.sublistView((await _record(RecordCmd.getTime, RecordCmd.time)).body);
@@ -135,19 +151,8 @@ class TalkaNoteCard {
   Future<void> answerButton(ButtonAction action, {bool accept = true}) =>
       _send(FrameType.recording, action.cmd + 1, [accept ? 1 : 2]);
 
-  Future<Frame> _record(int cmd, int reply, [List<int> params = const []]) {
-    if (RecordCmd.buttonRequests.contains(cmd)) _appButtonAt[cmd] = DateTime.now();
-    return _request(FrameType.recording, cmd, reply, params);
-  }
-
-  // ------------------------------------------------------------ live audio
-
-  /// Asks the card to stream audio while it records. Listen to [liveEvents].
-  Future<void> startLive() => _send(FrameType.live, LiveCmd.start);
-
-  Future<void> stopLive() => _send(FrameType.live, LiveCmd.stop);
-
-  Future<void> pauseLive(bool pause) => _send(FrameType.live, LiveCmd.pauseResume, [pause ? 1 : 0]);
+  Future<Frame> _record(int cmd, int reply, [List<int> params = const []]) =>
+      _request(FrameType.recording, cmd, reply, params);
 
   // ----------------------------------------------------------------- files
 
@@ -331,7 +336,12 @@ class TalkaNoteCard {
 
   void _onChunk(FrameParser parser, Uint8List chunk, {required bool fromEvents}) {
     for (final f in parser.add(chunk)) {
-      if (!f.isAck) _onFrame(f, fromEvents: fromEvents);
+      if (f.isAck) continue;
+      // Acknowledge every frame from the card with its SEQ, as the card's own apps do.
+      if (!_closed) {
+        transport.write(encodeRawFrame(f.seq, const [FrameType.recording])).catchError((Object _) {});
+      }
+      _onFrame(f, fromEvents: fromEvents);
     }
   }
 
@@ -402,10 +412,7 @@ class TalkaNoteCard {
   void _onListBatch(Uint8List body) {
     final list = _list;
     if (list == null || body.length < 4) return;
-    final count = ByteData.sublistView(body).getUint32(0, Endian.big);
-    for (var i = 0, o = 4; i < count && o + 28 <= body.length; i++, o += 28) {
-      list.files.add(CardFile.fromListEntry(Uint8List.sublistView(body, o, o + 28)));
-    }
+    list.files.addAll(CardFile.parseListBatch(body));
     _armListIdle();
   }
 
@@ -463,9 +470,11 @@ class TalkaNoteCard {
     });
   }
 
+  /// Older firmware reads a 24-byte NUL-padded name; longer names (newer
+  /// firmware) are sent as they are.
   static List<int> _nameField(String name) {
     final b = utf8.encode(name);
-    return [...b.take(24), ...List.filled(24 - (b.length < 24 ? b.length : 24), 0)];
+    return b.length >= 24 ? b : [...b, ...List.filled(24 - b.length, 0)];
   }
 
   static String _cString(Uint8List b) {
