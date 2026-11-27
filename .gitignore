@@ -1,0 +1,10 @@
+.dart_tool/
+.packages
+build/
+pubspec.lock
+.idea/
+*.iml
+.vscode/
+# recordings contain people's voices
+*.opus
+*.wav
