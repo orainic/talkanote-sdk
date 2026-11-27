@@ -9,8 +9,9 @@ class WindowsWifi {
   /// The network this computer is on now, or null.
   static Future<String?> currentNetwork() async {
     final r = await Process.run('netsh', ['wlan', 'show', 'interfaces']);
-    for (final line in (r.stdout as String).split('\n')) {
-      final m = RegExp(r'^\s*SSID\s*:\s*(.+)$').firstMatch(line);
+    // Lines end in \r\n; trim them before matching.
+    for (final line in (r.stdout as String).split('\n').map((l) => l.trim())) {
+      final m = RegExp(r'^SSID\s*:\s*(.+)$').firstMatch(line);
       if (m != null) return m.group(1)!.trim();
     }
     return null;
@@ -39,8 +40,15 @@ class WindowsWifi {
   }
 
   /// Goes back to [ssid] and forgets the card's network [forget].
-  static Future<void> rejoin(String? ssid, {String? forget}) async {
-    if (ssid != null) await Process.run('netsh', ['wlan', 'connect', 'name=$ssid']);
+  /// Waits until connected, up to [timeout].
+  static Future<void> rejoin(String? ssid, {String? forget, Duration timeout = const Duration(seconds: 45)}) async {
     if (forget != null) await Process.run('netsh', ['wlan', 'delete', 'profile', 'name=$forget']);
+    if (ssid == null) return;
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (await currentNetwork() == ssid) return;
+      await Process.run('netsh', ['wlan', 'connect', 'name=$ssid']);
+      await Future<void>.delayed(const Duration(seconds: 3));
+    }
   }
 }

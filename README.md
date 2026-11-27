@@ -146,7 +146,8 @@ card.setAppForeground(true);  // in AppLifecycleState.resumed
 flutter test                       # unit tests, no card needed
 cd example
 flutter run                        # the example app
-flutter test integration_test -d windows --dart-define=CARD_ID=<card id>   # against a real card
+flutter test integration_test/card_test.dart -d windows --dart-define=CARD_ID=<card id>   # real card, Bluetooth
+flutter test integration_test/wifi_test.dart -d windows --dart-define=CARD_ID=<card id>   # real Wi-Fi card; leaves your Wi-Fi for about a minute
 ```
 
 The integration test records about 5 seconds, downloads that recording and
